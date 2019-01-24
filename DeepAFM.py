@@ -8,22 +8,24 @@ from sklearn.metrics import mean_squared_error
 from tensorflow.python import debug as tfdbg
 
 import os
+
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 from time import time
 
 
 class DeepAFM(BaseEstimator, TransformerMixin):
 
-    def __init__(self, feature_size_one_hot, field_size_one_hot,   # one-hot feature parameters
+    def __init__(self, feature_size_one_hot, field_size_one_hot,  # one-hot feature parameters
                  feature_size_multi_value, field_size_multi_value,  # multi-value feature parameters
                  embedding_size=8, attention_size=10,  # AFM parameters
                  deep_layers=None, dropout_deep=None, deep_layer_activation=tf.nn.relu,  # DNN parameters
                  epoch=10, batch_size=1024, learning_rate=0.001, optimizer="adam",  # training parameters
                  use_afm=True, use_deep=True, random_seed=2018,  # random parameters
                  loss_type="mse", eval_metric=mean_squared_error, l2_reg=0.0,  # evaluating parameters
-                 rnn_size=201, num_rnn_layers=1, keep_lstm=0.5, num_unroll_steps=80, field_size_text=3, # LSTM parameters
+                 rnn_size=201, num_rnn_layers=1, keep_lstm=0.5, num_unroll_steps=80, field_size_text=3,
+                 # LSTM parameters
                  word_embeddings=None  # word vector parameters
-                 ,verbose=False, greater_is_better=True
+                 , verbose=False, greater_is_better=True
                  ):
 
         self.feature_size = feature_size_one_hot + feature_size_multi_value
@@ -83,8 +85,10 @@ class DeepAFM(BaseEstimator, TransformerMixin):
             self.feat_value = tf.placeholder(tf.float32, shape=[None, None], name='feat_value_one_hot')
 
             # multi_value feature part
-            self.feat_index_m = tf.placeholder(tf.int32, shape=[self.field_size_multi_value, None, None], name='feat_index_multi_value')
-            self.feat_value_m = tf.placeholder(tf.float32, shape=[self.field_size_multi_value, None, None], name='feat_value_multi_value')
+            self.feat_index_m = tf.placeholder(tf.int32, shape=[self.field_size_multi_value, None, None],
+                                               name='feat_index_multi_value')
+            self.feat_value_m = tf.placeholder(tf.float32, shape=[self.field_size_multi_value, None, None],
+                                               name='feat_value_multi_value')
 
             # text feature part
             self.text_data = tf.placeholder(tf.int32, [None, self.field_size_text, self.num_unroll_steps])  # N * Ft * S
@@ -95,21 +99,24 @@ class DeepAFM(BaseEstimator, TransformerMixin):
             # Embeddings
 
             # one-hot feature
-            self.embeddings_one_hot = tf.nn.embedding_lookup(self.weights['feature_embeddings_one_hot'], self.feat_index)  # N * Fo * K
+            self.embeddings_one_hot = tf.nn.embedding_lookup(self.weights['feature_embeddings_one_hot'],
+                                                             self.feat_index)  # N * Fo * K
             feat_value = tf.reshape(self.feat_value, shape=[-1, self.field_size_one_hot, 1])
-            self.embeddings_one_hot = tf.multiply(self.embeddings_one_hot, feat_value)  # N * Fo * K TODO: embeddings改为embedding_one_hot
+            self.embeddings_one_hot = tf.multiply(self.embeddings_one_hot,
+                                                  feat_value)  # N * Fo * K TODO: embeddings改为embedding_one_hot
 
             # multi_value feature
             embeddings_text_list = []
             for i in range(self.field_size_multi_value):
-                embeddings_multi_value = tf.nn.embedding_lookup(self.weights['feature_embeddings_multi_value'][i], self.feat_index_m[i, :, :])  # N * Fmi * K
+                embeddings_multi_value = tf.nn.embedding_lookup(self.weights['feature_embeddings_multi_value'][i],
+                                                                self.feat_index_m[i, :, :])  # N * Fmi * K
                 feat_value_m = tf.reshape(self.feat_value_m[i, :, :], shape=[-1, self.field_size_one_hot, 1])
                 embeddings_multi_value = tf.multiply(embeddings_multi_value, feat_value_m)  # N * Fmi * K
                 embeddings_multi_value = tf.reduce_sum(embeddings_multi_value, axis=1)  # N * K
 
-
             # text feature
-            self.word_embeddings = tf.Variable(tf.to_float(self.word_embeddings), trainable=True, name="word_embeddings")  # 字典长度 * E
+            self.word_embeddings = tf.Variable(tf.to_float(self.word_embeddings), trainable=True,
+                                               name="word_embeddings")  # 字典长度 * E
             embeddings_text_list = []
             for i in range(self.field_size_text):
                 embeddings_text_list.append(self.bilstm_network(self.text_data[:, i], self.mask_x[:, i], i))  # N * K
@@ -124,17 +131,22 @@ class DeepAFM(BaseEstimator, TransformerMixin):
             element_wise_product_list = []
             for i in range(self.field_size):
                 for j in range(i + 1, self.field_size):
-                    element_wise_product_list.append(tf.multiply(self.embeddings[:, i, :], self.embeddings[:, j, :]))  # N * K
+                    element_wise_product_list.append(
+                        tf.multiply(self.embeddings[:, i, :], self.embeddings[:, j, :]))  # N * K
 
             self.element_wise_product = tf.stack(element_wise_product_list)  # [F * (F - 1)/2] * N * K
-            self.element_wise_product = tf.transpose(self.element_wise_product, perm=[1, 0, 2], name='element_wise_product')  # N * [F * (F - 1)/2] *  K
+            self.element_wise_product = tf.transpose(self.element_wise_product, perm=[1, 0, 2],
+                                                     name='element_wise_product')  # N * [F * (F - 1)/2] *  K
 
             # attention part
             num_interactions = int(self.field_size * (self.field_size - 1) / 2)
             # wx+b -> relu(wx+b) -> h*relu(wx+b)
-            self.attention_wx_plus_b = tf.reshape(tf.add(tf.matmul(tf.reshape(self.element_wise_product, shape=(-1, self.embedding_size)), self.weights['attention_w']),
-                       self.weights['attention_b']),
-                shape=[-1, num_interactions, self.attention_size])  # N * [F * (F - 1)/2] * A
+            self.attention_wx_plus_b = tf.reshape(tf.add(
+                tf.matmul(tf.reshape(self.element_wise_product, shape=(-1, self.embedding_size)),
+                          self.weights['attention_w']),
+                self.weights['attention_b']),
+                shape=[-1, num_interactions,
+                       self.attention_size])  # N * [F * (F - 1)/2] * A
 
             self.attention_exp = tf.exp(tf.reduce_sum(tf.multiply(tf.nn.relu(self.attention_wx_plus_b),
                                                                   self.weights['attention_h']),
@@ -142,17 +154,32 @@ class DeepAFM(BaseEstimator, TransformerMixin):
 
             self.attention_exp_sum = tf.reduce_sum(self.attention_exp, axis=1, keepdims=True)  # N * 1 * 1
 
-            self.attention_out = tf.div(self.attention_exp, self.attention_exp_sum, name='attention_out')  # N * [F * (F - 1)/2] * 1
+            self.attention_out = tf.div(self.attention_exp, self.attention_exp_sum,
+                                        name='attention_out')  # N * [F * (F - 1)/2] * 1
 
-            self.attention_x_product = tf.reduce_sum(tf.multiply(self.attention_out, self.element_wise_product), axis=1, name='afm')  # N * K
+            self.attention_x_product = tf.reduce_sum(tf.multiply(self.attention_out, self.element_wise_product), axis=1,
+                                                     name='afm')  # N * K
 
             self.attention_part_sum = tf.matmul(self.attention_x_product, self.weights['attention_p'])  # N * 1
+
+            # first order term
+            #self.y_first_feat = tf.concat([tf.to_float(self.feat_index), self.embeddings_text], axis=1)
+            self.y_first_order = tf.nn.embedding_lookup(self.weights['feature_bias'], self.feat_index)
+            #self.y_first_order = tf.nn.embedding_lookup(self.weights['feature_bias'], self.y_first_feat)
+            #y_first_feat_value = tf.concat([feat_value, feat_value], axis=1)
+            self.y_first_embedding_one_hot = tf.multiply(self.y_first_order, feat_value)
+            #self.y_first_embedding_one_hot = tf.multiply(self.y_first_order, y_first_feat_value)
+            self.y_first_embedding = tf.concat([self.y_first_embedding_one_hot, self.embeddings_text], axis=1)
+            self.y_first_order = tf.reduce_sum(self.y_first_embedding, 2)
 
             # bias
             self.y_bias = self.weights['bias'] * tf.ones_like(self.label)  # N * 1
 
             # out
-            self.out_afm = tf.add_n([self.attention_part_sum, self.y_bias], name='out_afm')  # N * 1
+            # self.out_afm = tf.add_n([self.attention_part_sum, self.y_bias], name='out_afm')  # N * 1
+            self.out_afm = tf.add_n([tf.reduce_sum(self.y_first_order, axis=1, keep_dims=True),
+                                     self.attention_part_sum,
+                                     self.y_bias], name='out_afm')
 
             # Deep component
             self.y_deep = tf.reshape(self.embeddings, shape=[-1, self.field_size * self.embedding_size])
@@ -164,13 +191,15 @@ class DeepAFM(BaseEstimator, TransformerMixin):
                 self.y_deep = tf.nn.dropout(self.y_deep, self.dropout_keep_deep[i + 1])  # N * D
 
             # out
-            self.out_deep = tf.add(tf.matmul(self.y_deep, self.weights['deep_projection']), self.weights['deep_bias'])  # N * 1
-            #self.deep_loss = tf.nn.sigmoid(self.out_deep)
-            #self.deep_loss = tf.nn.l2_loss(tf.subtract(self.label, self.deep_loss))
+            self.out_deep = tf.add(tf.matmul(self.y_deep, self.weights['deep_projection']),
+                                   self.weights['deep_bias'])  # N * 1
+            # self.deep_loss = tf.nn.sigmoid(self.out_deep)
+            # self.deep_loss = tf.nn.l2_loss(tf.subtract(self.label, self.deep_loss))
 
             # concat output
             concat_input = tf.concat([self.out_afm, self.out_deep], axis=1)
-            self.out = tf.add(tf.matmul(concat_input, self.weights['concat_projection']), self.weights['concat_bias'])  # N * 1
+            self.out = tf.add(tf.matmul(concat_input, self.weights['concat_projection']),
+                              self.weights['concat_bias'])  # N * 1
 
             # loss
             if self.loss_type == "logloss":
@@ -233,13 +262,19 @@ class DeepAFM(BaseEstimator, TransformerMixin):
         weights['feature_embeddings'] = tf.Variable(
             tf.random_normal([self.feature_size, self.embedding_size], 0.0, 0.01),
             name='feature_embeddings')
+        weights['feature_embeddings_one_hot'] = tf.Variable(
+            tf.random_normal([self.feature_size, self.embedding_size], 0.0, 0.01),
+            name='feature_embeddings_one_hot')
+        weights['feature_bias'] = tf.Variable(tf.random_normal([self.feature_size, self.embedding_size], 0.0, 1.0),
+                                              name='feature_bias')
         weights['bias'] = tf.Variable(tf.constant(0.1), name='bias')
 
         # attention part
         glorot = np.sqrt(2.0 / (self.attention_size + self.embedding_size))
 
-        weights['attention_w'] = tf.Variable(np.random.normal(loc=0, scale=glorot, size=(self.embedding_size, self.attention_size)),
-                                             dtype=tf.float32, name='attention_w')
+        weights['attention_w'] = tf.Variable(
+            np.random.normal(loc=0, scale=glorot, size=(self.embedding_size, self.attention_size)),
+            dtype=tf.float32, name='attention_w')
 
         weights['attention_b'] = tf.Variable(np.random.normal(loc=0, scale=glorot, size=(self.attention_size,)),
                                              dtype=tf.float32, name='attention_b')
@@ -275,7 +310,15 @@ class DeepAFM(BaseEstimator, TransformerMixin):
         weights['deep_bias'] = tf.Variable(tf.constant(0.01), dtype=np.float32)
 
         # final concat projection layer
-        glorot = np.sqrt(2.0 / 3)
+
+        if self.use_afm and self.use_deep:
+            input_size = 2
+        elif self.use_afm:
+            input_size = 1
+        elif self.use_deep:
+            input_size = 1
+
+        glorot = np.sqrt(2.0 / (input_size + 1))
         weights['concat_projection'] = tf.Variable(np.random.normal(loc=0, scale=glorot, size=(2, 1)),
                                                    dtype=np.float32)
         weights['concat_bias'] = tf.Variable(tf.constant(0.01), dtype=np.float32)
@@ -320,7 +363,8 @@ class DeepAFM(BaseEstimator, TransformerMixin):
         # dummy y
         dummy_y = [1] * len(Xi)
         batch_index = 0
-        Xi_batch, Xv_batch, y_batch, Xt_batch, Xm_batch = self.get_batch(Xi, Xv, dummy_y, Xt, Xm, self.batch_size, batch_index)
+        Xi_batch, Xv_batch, y_batch, Xt_batch, Xm_batch = self.get_batch(Xi, Xv, dummy_y, Xt, Xm, self.batch_size,
+                                                                         batch_index)
         y_pred = None
         while len(Xi_batch) > 0:
             num_batch = len(y_batch)
@@ -340,8 +384,9 @@ class DeepAFM(BaseEstimator, TransformerMixin):
                 y_pred = np.concatenate((y_pred, np.reshape(batch_out, (num_batch,))))
 
             batch_index += 1
-            Xi_batch, Xv_batch, y_batch, Xt_batch, Xm_batch = self.get_batch(Xi, Xv, dummy_y, Xt, Xm, self.batch_size, batch_index)
-        #loss = self.sess.run([self.loss], feed_dict=feed_dict)
+            Xi_batch, Xv_batch, y_batch, Xt_batch, Xm_batch = self.get_batch(Xi, Xv, dummy_y, Xt, Xm, self.batch_size,
+                                                                             batch_index)
+        # loss = self.sess.run([self.loss], feed_dict=feed_dict)
 
         return y_pred
 
@@ -353,7 +398,7 @@ class DeepAFM(BaseEstimator, TransformerMixin):
                      self.label: y,
                      self.dropout_keep_deep: self.dropout_deep,
                      self.dropout_keep_lstm: self.dropout_lstm,
-                     self.train_phase: True} #TODO：self.dropout_lstm
+                     self.train_phase: True}  # TODO：self.dropout_lstm
 
         loss, opt = self.sess.run([self.loss, self.optimizer], feed_dict=feed_dict)
 
@@ -369,7 +414,8 @@ class DeepAFM(BaseEstimator, TransformerMixin):
             self.shuffle_in_unison_scary(Xi_train, Xv_train, y_train, Xt_train, Xm_train)
             total_batch = int(len(y_train) / self.batch_size)
             for i in range(total_batch):
-                Xi_batch, Xv_batch, y_batch, Xt_batch, Xm_batch = self.get_batch(Xi_train, Xv_train, y_train, Xt_train, Xm_train, self.batch_size, i)
+                Xi_batch, Xv_batch, y_batch, Xt_batch, Xm_batch = self.get_batch(Xi_train, Xv_train, y_train, Xt_train,
+                                                                                 Xm_train, self.batch_size, i)
                 self.fit_on_batch(Xi_batch, Xv_batch, Xt_batch, Xm_batch, y_batch)
 
             # evaluate training and validation datasets
@@ -381,10 +427,10 @@ class DeepAFM(BaseEstimator, TransformerMixin):
             if self.verbose > 0 and epoch % self.verbose == 0:
                 if has_valid:
                     print("[%d] train-result=%.4f, valid-result=%.4f [%.1f s]"
-                        % (epoch + 1, train_result, valid_result, time() - t1))
+                          % (epoch + 1, train_result, valid_result, time() - t1))
                 else:
                     print("[%d] train-result=%.4f [%.1f s]"
-                        % (epoch + 1, train_result, time() - t1))
+                          % (epoch + 1, train_result, time() - t1))
             if has_valid and early_stopping and self.training_termination(self.valid_result):
                 break
 
@@ -405,13 +451,15 @@ class DeepAFM(BaseEstimator, TransformerMixin):
                 self.shuffle_in_unison_scary(Xi_train, Xv_train, y_train, Xt_train, Xm_train)
                 total_batch = int(len(y_train) / self.batch_size)
                 for i in range(total_batch):
-                    Xi_batch, Xv_batch, y_batch, Xt_batch, Xm_batch = self.get_batch(Xi_train, Xv_train, y_train, Xt_train, Xm_train, self.batch_size, i)
+                    Xi_batch, Xv_batch, y_batch, Xt_batch, Xm_batch = self.get_batch(Xi_train, Xv_train, y_train,
+                                                                                     Xt_train, Xm_train,
+                                                                                     self.batch_size, i)
                     self.fit_on_batch(Xi_batch, Xv_batch, Xt_batch, Xm_batch, y_batch)
                 # check
                 train_result = self.evaluate(Xi_train, Xv_train, y_train, Xt_train, Xm_train)
                 if abs(train_result - best_train_score) < 0.001 or \
-                    (self.greater_is_better and train_result > best_train_score) or \
-                    ((not self.greater_is_better) and train_result < best_train_score):
+                        (self.greater_is_better and train_result > best_train_score) or \
+                        ((not self.greater_is_better) and train_result < best_train_score):
                     break
 
             # if has_valid:
@@ -463,6 +511,7 @@ class DeepAFM(BaseEstimator, TransformerMixin):
 
             return out_put
 
+
 def attention(inputs, attention_size):
     """
     Attention mechanism layer.
@@ -493,18 +542,19 @@ def attention(inputs, attention_size):
 
     return output
 
+
 def training_termination(self, valid_result):
     if len(valid_result) > 5:
         if self.greater_is_better:
             if valid_result[-1] < valid_result[-2] and \
-                valid_result[-2] < valid_result[-3] and \
-                valid_result[-3] < valid_result[-4] and \
-                valid_result[-4] < valid_result[-5]:
+                    valid_result[-2] < valid_result[-3] and \
+                    valid_result[-3] < valid_result[-4] and \
+                    valid_result[-4] < valid_result[-5]:
                 return True
         else:
             if valid_result[-1] > valid_result[-2] and \
-                valid_result[-2] > valid_result[-3] and \
-                valid_result[-3] > valid_result[-4] and \
-                valid_result[-4] > valid_result[-5]:
+                    valid_result[-2] > valid_result[-3] and \
+                    valid_result[-3] > valid_result[-4] and \
+                    valid_result[-4] > valid_result[-5]:
                 return True
     return False

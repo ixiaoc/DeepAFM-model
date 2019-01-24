@@ -50,7 +50,7 @@ class DataParser(object):
                 dfi.drop(col, axis=1, inplace=True)
                 dfv.drop(col, axis=1, inplace=True)
                 continue
-            if col in self.feat_dict.numeric_cols:  #TODO: 这里的代码有问题吧
+            if col in self.feat_dict.numeric_cols:
                 dfi[col] = self.feat_dict.feat_dict[col]
             else:
                 dfi[col] = dfi[col].map(self.feat_dict.feat_dict[col])

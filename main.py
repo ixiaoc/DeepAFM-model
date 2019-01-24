@@ -18,6 +18,9 @@ def load_data():
     dfTrain = pd.read_csv(config.TRAIN_FILE)
     dfTest = pd.read_csv(config.TEST_FILE)
 
+    #dfTrain.drop(['user_review', 'app_review', 'description'], axis=1, inplace=True)
+    #dfTest.drop(['user_review', 'app_review', 'description'], axis=1, inplace=True)
+
     cols = [c for c in dfTrain.columns if c not in ['review_ratting']]
     cols = [c for c in cols if (not c in config.IGNORE_COLS)]
 
@@ -138,6 +141,10 @@ def run_base_model_nfm(dfTrain, dfTest, folds, pnn_params):
     # Xi_train ：列的序号
     # Xv_train ：列的对应的值
     Xi_train, Xv_train, y_train = data_parser.parse(df=dfTrain)
+    print('xi_train')
+    print(Xi_train)
+    print('xv_train')
+    print(Xv_train)
     Xt_train, Xm_train = read_text_data(config.train_file, word2idx, config.num_unroll_steps)  # read data TODO：config 与 pnn_params
     Xi_test, Xv_test, y_test = data_parser.parse(df=dfTest)
     Xt_test, Xm_test = read_text_data(config.test_file, word2idx, config.num_unroll_steps)
@@ -178,7 +185,7 @@ def run_base_model_nfm(dfTrain, dfTest, folds, pnn_params):
     y_test_meta /= float(len(folds))
 
     # save result
-    clf_str = "DeepFM"
+    clf_str = "KDFM"
     print("%s: %.5f (%.5f)" % (clf_str, results_cv.mean(), results_cv.std()))
     filename = "%s_Mean%.5f_Std%.5f.csv" % (clf_str, results_cv.mean(), results_cv.std())
     _make_submission(y_test, y_test_meta, filename)
