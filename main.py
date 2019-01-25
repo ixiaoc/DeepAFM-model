@@ -141,10 +141,6 @@ def run_base_model_nfm(dfTrain, dfTest, folds, pnn_params):
     # Xi_train ：列的序号
     # Xv_train ：列的对应的值
     Xi_train, Xv_train, y_train = data_parser.parse(df=dfTrain)
-    print('xi_train')
-    print(Xi_train)
-    print('xv_train')
-    print(Xv_train)
     Xt_train, Xm_train = read_text_data(config.train_file, word2idx, config.num_unroll_steps)  # read data TODO：config 与 pnn_params
     Xi_test, Xv_test, y_test = data_parser.parse(df=dfTest)
     Xt_test, Xm_test = read_text_data(config.test_file, word2idx, config.num_unroll_steps)
@@ -185,7 +181,12 @@ def run_base_model_nfm(dfTrain, dfTest, folds, pnn_params):
     y_test_meta /= float(len(folds))
 
     # save result
-    clf_str = "KDFM"
+    if pnn_params["use_afm"] and pnn_params["use_deep"]:
+        clf_str = "KDFM"
+    elif pnn_params["use_afm"]:
+        clf_str = "AFM"
+    elif pnn_params["use_deep"]:
+        clf_str = "DNN"
     print("%s: %.5f (%.5f)" % (clf_str, results_cv.mean(), results_cv.std()))
     filename = "%s_Mean%.5f_Std%.5f.csv" % (clf_str, results_cv.mean(), results_cv.std())
     _make_submission(y_test, y_test_meta, filename)
@@ -216,6 +217,8 @@ def _plot_fig(train_results, valid_results, model_name):
 
 # TODO: lack of feature_size & word_embeddings
 pnn_params = {
+    "use_afm": True,
+    "use_deep": True,
     #"field_size": 6,
     #"feature_size_one_hot": 1,
     "field_size_one_hot": 3,
@@ -252,4 +255,14 @@ dfTrain, dfTest, X_train, y_train, X_test, y_test = load_data()
 folds = list(StratifiedKFold(n_splits=config.NUM_SPLITS, shuffle=True,
                              random_state=config.RANDOM_SEED).split(X_train, y_train))
 
-run_base_model_nfm(dfTrain, dfTest, folds, pnn_params)
+#run_base_model_nfm(dfTrain, dfTest, folds, pnn_params)
+
+# ------------------ FM Model ------------------
+afm_params = pnn_params.copy()
+pnn_params["use_deep"] = False
+run_base_model_nfm(dfTrain, dfTest, folds, afm_params)
+
+# ------------------ DNN Model ------------------
+dnn_params = pnn_params.copy()
+pnn_params["use_afm"] = False
+run_base_model_nfm(dfTrain, dfTest, folds, dnn_params)

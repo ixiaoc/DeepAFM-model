@@ -177,7 +177,7 @@ class DeepAFM(BaseEstimator, TransformerMixin):
 
             # out
             # self.out_afm = tf.add_n([self.attention_part_sum, self.y_bias], name='out_afm')  # N * 1
-            self.out_afm = tf.add_n([tf.reduce_sum(self.y_first_order, axis=1, keep_dims=True),
+            self.out_afm = tf.add_n([tf.reduce_sum(self.y_first_order, axis=1, keepdims=True),
                                      self.attention_part_sum,
                                      self.y_bias], name='out_afm')
 
@@ -197,9 +197,16 @@ class DeepAFM(BaseEstimator, TransformerMixin):
             # self.deep_loss = tf.nn.l2_loss(tf.subtract(self.label, self.deep_loss))
 
             # concat output
-            concat_input = tf.concat([self.out_afm, self.out_deep], axis=1)
+            if self.use_afm and self.use_deep:
+                concat_input = tf.concat([self.out_afm, self.out_deep], axis=1)
+            elif self.use_afm:
+                concat_input = self.out_afm
+            elif self.use_deep:
+                concat_input = self.out_deep
+
             self.out = tf.add(tf.matmul(concat_input, self.weights['concat_projection']),
                               self.weights['concat_bias'])  # N * 1
+
 
             # loss
             if self.loss_type == "logloss":
