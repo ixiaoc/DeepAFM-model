@@ -10,7 +10,7 @@ import codecs
 from collections import defaultdict
 
 import config
-from DeepAFM import DeepAFM
+from KDFM import DeepAFM
 from metrics import gini_norm, mse_norm
 
 
@@ -18,8 +18,8 @@ def load_data():
     dfTrain = pd.read_csv(config.TRAIN_FILE)
     dfTest = pd.read_csv(config.TEST_FILE)
 
-    #dfTrain.drop(['user_review', 'app_review', 'description'], axis=1, inplace=True)
-    #dfTest.drop(['user_review', 'app_review', 'description'], axis=1, inplace=True)
+    dfTrain.drop(config.TEXT_COLS, axis=1, inplace=True)
+    dfTest.drop(config.TEXT_COLS, axis=1, inplace=True)
 
     cols = [c for c in dfTrain.columns if c not in ['review_ratting']]
     cols = [c for c in cols if (not c in config.IGNORE_COLS)]
@@ -28,6 +28,9 @@ def load_data():
     y_train = dfTrain['review_ratting'].values
     X_test = dfTest[cols].values
     y_test = dfTest['review_ratting'].values
+
+    # Xm_train = xmTrain[xm_cols].values
+    # Xm_test = xmTest[xm_cols].values
 
     return dfTrain, dfTest, X_train, y_train, X_test, y_test
 
@@ -132,7 +135,8 @@ def run_base_model_nfm(dfTrain, dfTest, folds, pnn_params):
     fd = FeatureDictionary(dfTrain=dfTrain,
                            dfTest=dfTest,
                            numeric_cols=config.NUMERIC_COLS,
-                           ignore_cols=config.IGNORE_COLS)
+                           ignore_cols=config.IGNORE_COLS,
+                           xm_cols=config.XM_COLS)
     data_parser = DataParser(feat_dict=fd)
 
     # 新添
@@ -141,9 +145,9 @@ def run_base_model_nfm(dfTrain, dfTest, folds, pnn_params):
     # Xi_train ：列的序号
     # Xv_train ：列的对应的值
     Xi_train, Xv_train, y_train = data_parser.parse(df=dfTrain)
-    Xt_train, Xm_train = read_text_data(config.train_file, word2idx, config.num_unroll_steps)  # read data TODO：config 与 pnn_params
+    Xt_train, Xm_train = read_text_data(config.TRAIN_FILE, word2idx, config.num_unroll_steps)  # read data TODO：config 与 pnn_params
     Xi_test, Xv_test, y_test = data_parser.parse(df=dfTest)
-    Xt_test, Xm_test = read_text_data(config.test_file, word2idx, config.num_unroll_steps)
+    Xt_test, Xm_test = read_text_data(config.TEST_FILE, word2idx, config.num_unroll_steps)
 
 
     pnn_params['feature_size_one_hot'] = fd.feat_dim
@@ -156,6 +160,8 @@ def run_base_model_nfm(dfTrain, dfTest, folds, pnn_params):
     results_cv = np.zeros(len(folds), dtype=float)
     results_epoch_train = np.zeros((len(folds), pnn_params['epoch']), dtype=float)
     results_epoch_valid = np.zeros((len(folds), pnn_params['epoch']), dtype=float)
+    results_epoch_train_mae = np.zeros((len(folds), pnn_params['epoch']), dtype=float)
+    results_epoch_valid_mae = np.zeros((len(folds), pnn_params['epoch']), dtype=float)
 
     def _get(x, l): return [x[i] for i in l]
 
@@ -163,20 +169,33 @@ def run_base_model_nfm(dfTrain, dfTest, folds, pnn_params):
         Xi_train_, Xv_train_, y_train_, Xt_train_, Xm_train_ = \
             _get(Xi_train, train_idx), _get(Xv_train, train_idx), _get(y_train, train_idx), \
             _get(Xt_train, train_idx), _get(Xm_train, train_idx)
+
         Xi_valid_, Xv_valid_, y_valid_, Xt_valid_, Xm_valid_ = \
             _get(Xi_train, valid_idx), _get(Xv_train, valid_idx), _get(y_train, valid_idx), \
             _get(Xt_train, valid_idx), _get(Xm_train, valid_idx)
 
         afm = DeepAFM(**pnn_params)
-        afm.fit(Xi_train_, Xv_train_, y_train_, Xt_train_, Xm_train_,
-                Xi_valid_, Xv_valid_, y_valid_, Xt_valid_, Xm_valid_)
+        Xim_train_ = []
+        Xvm_train_ = []
+        Xim_valid_ = []
+        Xvm_vaild_ = []
+        Xim_test = []
+        Xvm_test = []
 
-        y_train_meta[valid_idx, 0] = afm.predict(Xi_valid_, Xv_valid_, Xt_valid_, Xm_valid_)
-        y_test_meta[:, 0] += afm.predict(Xi_test, Xv_test, Xt_test, Xm_test)
+
+        afm.fit(Xi_train_, Xv_train_, Xim_train_, Xvm_train_, Xt_train_, y_train_,
+                Xi_valid_, Xv_valid_, Xim_valid_, Xvm_vaild_, Xt_valid_,y_valid_)
+
+        y_train_meta[valid_idx, 0] = afm.predict(Xi_valid_, Xv_valid_, Xim_valid_, Xvm_vaild_, Xt_valid_)
+        y_test_meta[:, 0] += afm.predict(Xi_test, Xv_test, Xim_test, Xvm_test, Xt_test)
+
 
         results_cv[i] = mse_norm(y_valid_, y_train_meta[valid_idx])
         results_epoch_train[i] = afm.train_result
         results_epoch_valid[i] = afm.valid_result
+
+        results_epoch_train_mae[i] = afm.mae_train_result
+        results_epoch_valid_mae[i] = afm.mae_valid_result
 
     y_test_meta /= float(len(folds))
 
@@ -189,16 +208,23 @@ def run_base_model_nfm(dfTrain, dfTest, folds, pnn_params):
         clf_str = "DNN"
     print("%s: %.5f (%.5f)" % (clf_str, results_cv.mean(), results_cv.std()))
     filename = "%s_Mean%.5f_Std%.5f.csv" % (clf_str, results_cv.mean(), results_cv.std())
+    filename1 = "params%s_Mean%.5f_Std%.5f.csv" % (clf_str, results_cv.mean(), results_cv.std())
     _make_submission(y_test, y_test_meta, filename)
+    _make_pnn_params(pnn_params.keys(), pnn_params.values(), filename1)
 
-    _plot_fig(results_epoch_train, results_epoch_valid, clf_str)
+    _plot_fig(results_epoch_train, results_epoch_valid, clf_str+'mse', "mse")
+    _plot_fig(results_epoch_train_mae, results_epoch_valid_mae, clf_str+'mae', "mae")
 
-def _make_submission(ids, y_pred, filename="submission.csv"):
-    pd.DataFrame({"id": ids, "target": y_pred.flatten()}).to_csv(
+def _make_submission(target, y_pred, filename="submission.csv"):
+    pd.DataFrame({"id": range(len(target)), "target": target, "predict": y_pred.flatten()}).to_csv(
+        os.path.join(config.SUB_DIR, filename), index=False, float_format="%.5f")
+
+def _make_pnn_params(key, value, filename="pnn_params.csv"):
+    pd.DataFrame({"key": key, "value": value}).to_csv(
         os.path.join(config.SUB_DIR, filename), index=False, float_format="%.5f")
 
 
-def _plot_fig(train_results, valid_results, model_name):
+def _plot_fig(train_results, valid_results, model_name, algor):
     colors = ["red", "blue", "green"]
     xs = np.arange(1, train_results.shape[1]+1)
     plt.figure()
@@ -209,7 +235,10 @@ def _plot_fig(train_results, valid_results, model_name):
         legends.append("train-%d"%(i+1))
         legends.append("valid-%d"%(i+1))
     plt.xlabel("Epoch")
-    plt.ylabel("mse")
+    if algor == 'mae':
+        plt.ylabel("mae")
+    if algor == 'mse':
+        plt.ylabel("mse")
     plt.title("%s"%model_name)
     plt.legend(legends)
     plt.savefig("fig/%s.png"%model_name)
@@ -220,7 +249,7 @@ pnn_params = {
     "use_afm": True,
     "use_deep": True,
     #"field_size": 6,
-    #"feature_size_one_hot": 1,
+    "feature_size_one_hot": 1,
     "field_size_one_hot": 3,
     "feature_size_multi_value": 0,
     "field_size_multi_value": 0,
@@ -237,13 +266,14 @@ pnn_params = {
     "optimizer": "adam",
 
     "random_seed": config.RANDOM_SEED,
-    "l2_reg": 0.1,
+    "l2_reg": 0.2,
 
     "rnn_size": 100,
     "num_rnn_layers": 1,
     "keep_lstm": 0.5,
     "num_unroll_steps": 100,  # 句子长度
-    "verbose": True
+    "verbose": True,
+    "topics": 10
 }
 
 
@@ -255,7 +285,7 @@ dfTrain, dfTest, X_train, y_train, X_test, y_test = load_data()
 folds = list(StratifiedKFold(n_splits=config.NUM_SPLITS, shuffle=True,
                              random_state=config.RANDOM_SEED).split(X_train, y_train))
 
-#run_base_model_nfm(dfTrain, dfTest, folds, pnn_params)
+run_base_model_nfm(dfTrain, dfTest, folds, pnn_params)
 
 # ------------------ FM Model ------------------
 afm_params = pnn_params.copy()
@@ -263,6 +293,6 @@ pnn_params["use_deep"] = False
 run_base_model_nfm(dfTrain, dfTest, folds, afm_params)
 
 # ------------------ DNN Model ------------------
-dnn_params = pnn_params.copy()
-pnn_params["use_afm"] = False
-run_base_model_nfm(dfTrain, dfTest, folds, dnn_params)
+# dnn_params = pnn_params.copy()
+# pnn_params["use_afm"] = False
+# run_base_model_nfm(dfTrain, dfTest, folds, dnn_params)

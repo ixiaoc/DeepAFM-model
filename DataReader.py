@@ -2,11 +2,12 @@ import pandas as pd
 
 
 class FeatureDictionary(object):
-    def __init__(self, dfTrain=None, dfTest=None, numeric_cols=[], ignore_cols=[]):
+    def __init__(self, dfTrain=None, dfTest=None, numeric_cols=[], ignore_cols=[], xm_cols=[]):
         self.dfTrain = dfTrain
         self.dfTest = dfTest
         self.numeric_cols = numeric_cols
         self.ignore_cols = ignore_cols
+        self.xm_cols = xm_cols
         self.get_feat_dict()
 
     def get_feat_dict(self):
@@ -41,6 +42,7 @@ class DataParser(object):
         y = dfi['review_ratting'].values.tolist()
         # TODO: 删掉了‘id’
         dfi.drop(['review_ratting'], axis=1, inplace=True)
+        # dfi.drop([self.feat_dict.xm_cols], axis=1, inplace=True)
 
         # dfi for feature index
         # dfv for feature value which can be either binary (1/0) or float (e.g., 10.24)

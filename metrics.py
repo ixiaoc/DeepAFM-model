@@ -17,5 +17,5 @@ def mse_norm(actual, pred):
     assert (len(actual) == len(pred))
     se = 0
     for i in range(len(actual)):
-        se += (actual[0]-pred[0])**2
+        se += (actual[i]-pred[i])**2
     return se / len(actual)
